@@ -1,0 +1,42 @@
+name: Video Link Checker
+
+on:
+  schedule:
+    - cron: '20 * * * *'   # har ghante chalta hai; roz 9 baje (PK) poora site check shuru karta hai
+  workflow_dispatch:
+    inputs:
+      test_url:
+        description: 'Sirf ek link test karna ho to yahan paste karein (warna khali)'
+        required: false
+        default: ''
+      force:
+        description: 'Aaj dobara poora check (true / false)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: link-checker
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install firebase-admin@12
+      - name: Run checker
+        run: node checker.js
+        env:
+          BLOG_URL: ${{ secrets.BLOG_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RUN_MINUTES: '40'
+          START_HOUR: '9'
+          TEST_URL: ${{ github.event.inputs.test_url }}
+          FORCE: ${{ github.event.inputs.force }}
