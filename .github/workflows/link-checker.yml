@@ -2,7 +2,7 @@ name: Video Link Checker
 
 on:
   schedule:
-    - cron: '20 * * * *'   # har ghante chalta hai; roz 9 baje (PK) poora site check shuru karta hai
+    - cron: '20 * * * *'   # har ghante chalta hai; din mein 4 baar (12, 9, 2, 8 PK) poori site check karta hai
   workflow_dispatch:
     inputs:
       test_url:
@@ -37,6 +37,6 @@ jobs:
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           RUN_MINUTES: '40'
-          START_HOUR: '9'
+          START_HOURS: '0,9,14,20'   # raat 12, subah 9, dopehar 2, raat 8 (Pakistan time)
           TEST_URL: ${{ github.event.inputs.test_url }}
           FORCE: ${{ github.event.inputs.force }}
