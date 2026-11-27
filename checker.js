@@ -1,12 +1,12 @@
 // ================================================================
-//  Watchanidubs — Daily Video Link Checker (v2, theme-matched)
+//  Watchanidubs — Video Link Checker (v3, multi-time)
 //  - Theme ke "ms-data" JSON se har episode ke har server ka link
 //    nikalta hai (Season / Episode / Language / Server ke sath)
 //  - Har link kholta hai, deleted video pakadta hai
 //  - Dead link ko Firebase "rep/" me usi format me likhta hai jo
 //    Studio > Link Health me dikhta hai (Fix link button ke sath)
-//  - Naya dead link milte hi ntfy alert, aur roz ek daily report
-//    (sab theek ho tab bhi)
+//  - Naya dead link milte hi ntfy alert, aur har START_HOURS slot par
+//    ek report (sab theek ho tab bhi)
 // ================================================================
 const admin = require('firebase-admin');
 
@@ -33,9 +33,11 @@ const ENV = process.env;
 const BLOG_URL = (ENV.BLOG_URL || '').trim().replace(/\/+$/, '');
 const NTFY_TOPIC = (ENV.NTFY_TOPIC || '').trim();
 const TEST_URL = (ENV.TEST_URL || '').trim();
-const FORCE = (ENV.FORCE || '') === 'true';            // manual run: aaj dobara poora check
+const FORCE = (ENV.FORCE || '') === 'true';            // manual run: abhi dobara poora check
 const RUN_MINUTES = parseInt(ENV.RUN_MINUTES || '40', 10);
-const START_HOUR = parseInt(ENV.START_HOUR || '9', 10); // Pakistan time, roz isi waqt se check shuru
+// Pakistan time ke ghante jin par check shuru ho, e.g. '0,9,15,20'
+const START_HOURS = String(ENV.START_HOURS || ENV.START_HOUR || '9')
+  .split(',').map((x) => parseInt(x, 10)).filter((n) => n >= 0 && n < 24).sort((a, b) => a - b);
 const TZ_HOURS = 5;                                     // Pakistan UTC+5
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
@@ -44,6 +46,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pkNow = () => new Date(Date.now() + TZ_HOURS * 3600e3);
 const pkDate = () => pkNow().toISOString().slice(0, 10);
 const pkHour = () => pkNow().getUTCHours();
+
+// abhi kaun sa time slot chal raha hai, e.g. "2026-11-27@15"
+function currentSlot() {
+  const h = pkHour();
+  const past = START_HOURS.filter((x) => x <= h);
+  if (past.length) return pkDate() + '@' + past[past.length - 1];
+  // aaj ka pehla slot abhi nahi aaya -> kal ka aakhri slot
+  const y = new Date(pkNow().getTime() - 86400e3).toISOString().slice(0, 10);
+  return y + '@' + START_HOURS[START_HOURS.length - 1];
+}
 
 // ---- theme ke functions ki hubahu copy (taake keys Studio se match karein) ----
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
@@ -165,15 +177,17 @@ async function main() {
 
   let st = (await LC.child('state').get()).val() || {};
   const today = pkDate();
+  const slot = currentSlot();
   let cursor = st.cursor || 1;
+  console.log('Times (PK):', START_HOURS.join(', '), '| abhi ka slot:', slot);
 
-  // ---- naya daily cycle shuru karna hai ya nahi ----
+  // ---- naya cycle shuru karna hai ya nahi ----
   if (cursor === 1) {
-    if (!FORCE && st.lastDoneDate === today) { console.log('Aaj ka poora check ho chuka hai. Kal phir.'); return; }
-    if (!FORCE && pkHour() < START_HOUR) { console.log(`Abhi ${START_HOUR} baje (PK) se pehle ka waqt hai, intezar.`); return; }
-    st = { cursor: 1, cycleStart: Date.now(), cycleDate: today, lastDoneDate: st.lastDoneDate || '',
+    if (!FORCE && st.lastDoneSlot === slot) { console.log('Is time slot ka check ho chuka hai. Agle time par.'); return; }
+    st = { cursor: 1, cycleStart: Date.now(), cycleDate: today, cycleSlot: slot,
+           lastDoneDate: st.lastDoneDate || '', lastDoneSlot: st.lastDoneSlot || '',
            lastProgress: '', stats: { posts: 0, links: 0, ok: 0, dead: 0, unknown: 0, newDead: 0, fixed: 0 } };
-    console.log('Naya daily check shuru:', today);
+    console.log('Naya check shuru:', slot);
   }
   const S = st.stats;
   const deadMap = (await LC.child('dead').get()).val() || {};
@@ -265,19 +279,19 @@ async function main() {
     const mins = Math.max(1, Math.round((Date.now() - st.cycleStart) / 60000));
     const head = `${S.posts} anime/movies · ${S.links} links · ${mins} min`;
     if (!deadNow.length) {
-      await notify('Daily report: sab videos theek hain',
+      await notify('Report: sab videos theek hain',
         `${head}\nOK: ${S.ok} · Check nahi ho sake: ${S.unknown}\nKoi dead link nahi.`, { tags: 'white_check_mark' });
     } else {
-      await notify(`Daily report: ${deadNow.length} dead link abhi baqi`,
+      await notify(`Report: ${deadNow.length} dead link abhi baqi`,
         `${head}\nOK: ${S.ok} · Dead: ${deadNow.length} · Check nahi ho sake: ${S.unknown}\n\n` +
         deadNow.slice(0, 40).map((d) => `• ${label(d)}`).join('\n'), { tags: 'warning', priority: 'high' });
     }
-    st.lastDoneDate = today; st.cursor = 1;
+    st.lastDoneSlot = slot; st.lastDoneDate = today; st.cursor = 1;
   } else {
     st.cursor = cursor;
     // bohot bara site: cycle 1 din se lamba chal raha ho to roz progress bhejo
-    if (Date.now() - st.cycleStart > 20 * 3600e3 && st.lastProgress !== today && pkHour() >= START_HOUR) {
-      await notify('Daily report: check abhi jari hai',
+    if (Date.now() - st.cycleStart > 20 * 3600e3 && st.lastProgress !== today) {
+      await notify('Report: check abhi jari hai',
         `${S.posts} of ~${total} posts check ho chuki · ${S.links} links\nDead: ${deadNow.length} · Check nahi ho sake: ${S.unknown}`, { tags: 'hourglass' });
       st.lastProgress = today;
     }
