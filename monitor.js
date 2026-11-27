@@ -38,6 +38,22 @@ async function fetchT(url, opts = {}, ms = 20000) {
   finally { clearTimeout(timer); }
 }
 
+// Site ki feed chal rahi hai? (Google ka bot-check homepage par aata hai, feed par aam tor par nahi)
+async function feedAlive(host) {
+  for (let t = 1; t <= 2; t++) {
+    try {
+      const r = await fetchT(`${BLOG_URL}/feeds/posts/summary?alt=json&max-results=1&_=${Date.now()}`, { redirect: 'follow', headers: { 'User-Agent': UA } });
+      console.log('Feed check:', r.status, r.url);
+      if (r.ok && bare(new URL(r.url).hostname) === bare(host)) {
+        const j = await r.json();
+        if (j && j.feed) return true;
+      }
+    } catch (e) { console.log('Feed check error:', e.message); }
+    if (t < 2) await sleep(15000);
+  }
+  return false;
+}
+
 // ---------------- 1. Site up / DNS / redirect ----------------
 async function checkSite(host) {
   try { await dns.lookup(host); }
@@ -52,8 +68,15 @@ async function checkSite(host) {
       const r = await fetchT(BLOG_URL + '/', { redirect: 'follow', headers: { 'User-Agent': UA } });
       const finalHost = new URL(r.url).hostname;
       const body = (await r.text()).toLowerCase();
+      console.log('Homepage:', r.status, r.url);
       if (bare(finalHost) !== bare(host)) {
-        return { ok: false, reason: `Site doosre domain par redirect ho rahi hai: ${finalHost}\nYeh domain hijack ya DNS change ho sakta hai.` };
+        // Google / Blogger ka apna page: aksar GitHub server ko "robot" samajh kar roka jata hai.
+        // Is surat mein feed se dobara dekho; feed chal rahi hai to site theek hai.
+        if (/(^|\.)(google\.[a-z.]+|blogger\.com|blogspot\.com|googleusercontent\.com)$/i.test(finalHost)) {
+          if (await feedAlive(host)) { console.log('Google ka bot-check page mila, lekin feed theek hai: site OK'); return { ok: true }; }
+          return { ok: false, reason: `Site Google/Blogger ke page par ja rahi hai aur feed bhi nahi khul rahi.\n${r.url}\nBlog band, private ya removed ho sakta hai. Blogger dashboard aur Gmail check karo.` };
+        }
+        return { ok: false, reason: `Site doosre domain par redirect ho rahi hai: ${r.url}\nYeh domain hijack ya DNS change ho sakta hai.` };
       }
       const rm = REMOVED_WORDS.find((w) => body.includes(w));
       if (rm) return { ok: false, reason: `Blogger page keh raha hai: "${rm}"\nBlogger dashboard aur Gmail foran check karo.` };
