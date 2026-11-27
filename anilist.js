@@ -89,7 +89,7 @@ async function anilist(query, variables = {}) {
 
 const SCHED_Q = `query($from:Int,$to:Int,$p:Int){Page(page:$p,perPage:50){pageInfo{hasNextPage}
   airingSchedules(airingAt_greater:$from,airingAt_lesser:$to,sort:TIME){
-    episode airingAt media{id isAdult popularity format episodes title{romaji english}}}}}`;
+    episode airingAt media{id isAdult popularity format episodes title{romaji english} externalLinks{site type}}}}}`;
 const UPCOMING_Q = `query{Page(perPage:50){media(type:ANIME,status:NOT_YET_RELEASED,sort:POPULARITY_DESC,isAdult:false){
   id format title{romaji english} startDate{year month day}}}}`;
 
@@ -101,7 +101,8 @@ async function schedule(fromMs, toMs) {
     for (const s of pg.airingSchedules || []) {
       const m = s.media;
       if (!m || m.isAdult || !FORMATS.includes(m.format)) continue;
-      out.push({ id: m.id, ep: s.episode, at: s.airingAt * 1000, pop: m.popularity || 0, total: m.episodes || 0, fmt: m.format, name: nameOf(m) });
+      const plat = [...new Set((m.externalLinks || []).filter((l) => l && l.type === 'STREAMING' && l.site).map((l) => l.site))].slice(0, 2).join(', ');
+      out.push({ id: m.id, ep: s.episode, at: s.airingAt * 1000, pop: m.popularity || 0, total: m.episodes || 0, fmt: m.format, name: nameOf(m), plat });
     }
     if (!pg.pageInfo || !pg.pageInfo.hasNextPage) break;
   }
@@ -116,7 +117,7 @@ function loadWatch() {
 }
 
 const epLine = (s, now, withDay) =>
-  `• ${withDay ? whenWord(s.at, now) + ' ' : ''}${pkClock(s.at)} — ${s.name} EP ${s.ep}${s.total && s.ep === s.total ? ' (aakhri)' : ''}${s.ep === 1 ? ' 🆕' : ''}`;
+  `• ${withDay ? whenWord(s.at, now) + ' ' : ''}${pkClock(s.at)} — ${s.name} EP ${s.ep}${s.plat ? ' (' + s.plat + ')' : ''}${s.total && s.ep === s.total ? ' (aakhri)' : ''}${s.ep === 1 ? ' 🆕' : ''}`;
 
 async function main() {
   admin.initializeApp({
@@ -154,7 +155,7 @@ async function main() {
     const lines = [];
     if (naye.length) {
       lines.push('🆕 NAYI ANIME:');
-      for (const s of naye) lines.push(`• ${pkClock(s.at)} — ${s.name} EP 1 (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' ep' : ''})`);
+      for (const s of naye) lines.push(`• ${pkClock(s.at)} — ${s.name} EP 1 (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' ep' : ''})${s.plat ? ' · ' + s.plat : ''}`);
       if (baqi.length) lines.push('');
     }
     if (baqi.length) {
@@ -173,7 +174,7 @@ async function main() {
   const prem = list.filter((s) => s.ep === 1 && s.at > now && s.at - now <= 24.5 * HOUR && big(s, MIN_POP) && !sent[`p_${s.id}`]);
   if (prem.length) {
     await notify(prem.length === 1 ? `Nayi anime shuru: ${prem[0].name}` : `${prem.length} nayi anime shuru hone wali`,
-      prem.map((s) => `• ${whenWord(s.at, now)} ${pkClock(s.at)} — ${s.name} (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' episodes' : ''})\n  anilist.co/anime/${s.id}`).join('\n'),
+      prem.map((s) => `• ${whenWord(s.at, now)} ${pkClock(s.at)} — ${s.name} (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' episodes' : ''})${s.plat ? ' · ' + s.plat : ''}\n  anilist.co/anime/${s.id}`).join('\n'),
       { tags: 'sparkles', priority: 'high' });
     for (const s of prem) sent[`p_${s.id}`] = now;
   }
@@ -193,7 +194,7 @@ async function main() {
     const lines = [];
     if (naye.length) {
       lines.push(`🆕 NAYI ANIME (${naye.length}):`);
-      for (const s of naye) lines.push(`• ${pkClock(s.at)} — ${s.name} (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' ep' : ''})`);
+      for (const s of naye) lines.push(`• ${pkClock(s.at)} — ${s.name} (${fmtOf(s.fmt)}${s.total ? ', ' + s.total + ' ep' : ''})${s.plat ? ' · ' + s.plat : ''}`);
       lines.push('');
     }
     if (kal.length) {
