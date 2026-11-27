@@ -1,9 +1,11 @@
 // ================================================================
-//  Watchanidubs — Site Monitor (har ghante)
+//  Watchanidubs - Site Monitor v2 (har ghante)
 //  - Site khul rahi hai ya nahi (DNS, HTTP, Blogger "blog removed")
 //  - Site kisi doosre domain par redirect to nahi ho rahi
 //  - SSL certificate aur domain registration expiry ka alert
-//  - Koi published post achanak gayab ho jaye (DMCA / draft) to alert
+//  - Koi published post achanak gayab ho jaye to alert
+//  v2: expired SSL bhi pakadta hai, lambi list kat'ti nahi,
+//      alag ntfy topic (NTFY_TOPIC_MONITOR) ka option
 // ================================================================
 const admin = require('firebase-admin');
 const tls = require('tls');
@@ -11,10 +13,13 @@ const dns = require('dns').promises;
 
 const ENV = process.env;
 const BLOG_URL = (ENV.BLOG_URL || '').trim().replace(/\/+$/, '');
-const NTFY_TOPIC = (ENV.NTFY_TOPIC || '').trim();
+const NTFY_SERVER = (ENV.NTFY_SERVER || 'https://ntfy.sh').trim().replace(/\/+$/, '');
+const NTFY_TOPIC = (ENV.NTFY_TOPIC_MONITOR || ENV.NTFY_TOPIC || '').trim();
+const NTFY_TOKEN = (ENV.NTFY_TOKEN || '').trim();
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const DAY = 86400e3;
 const HOUR = 3600e3;
+const MAX_LIST = 20;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const bare = (h) => String(h || '').toLowerCase().replace(/^www\./, '');
 
@@ -23,12 +28,22 @@ const REMOVED_WORDS = ['blog has been removed', 'blog has been deleted', 'sorry,
   'this blog is open to invited readers only', 'has been removed for violating'];
 
 async function notify(title, body, opts = {}) {
-  if (!NTFY_TOPIC) { console.log('[ntfy off]', title, body); return; }
+  if (!NTFY_TOPIC) { console.log('[ntfy off]', title, body); return true; }
   const msg = body.length > 3500 ? body.slice(0, 3450) + '\n... aur bhi hain' : body;
-  const q = '?title=' + encodeURIComponent(title) + '&tags=' + encodeURIComponent(opts.tags || 'bell') +
-            '&priority=' + (opts.priority || 'default') + (opts.click ? '&click=' + encodeURIComponent(opts.click) : '');
-  try { const r = await fetch('https://ntfy.sh/' + NTFY_TOPIC + q, { method: 'POST', body: msg }); console.log('ntfy', r.status, title); }
-  catch (e) { console.log('ntfy error:', e.message); }
+  let q = '?title=' + encodeURIComponent(title) + '&tags=' + encodeURIComponent(opts.tags || 'bell') +
+          '&priority=' + encodeURIComponent(opts.priority || 'default');
+  if (opts.click) q += '&click=' + encodeURIComponent(opts.click);
+  const headers = NTFY_TOKEN ? { Authorization: 'Bearer ' + NTFY_TOKEN } : {};
+  for (let t = 1; t <= 3; t++) {
+    try {
+      const r = await fetch(`${NTFY_SERVER}/${NTFY_TOPIC}${q}`, { method: 'POST', body: msg, headers });
+      console.log('ntfy', r.status, title);
+      if (r.ok) return true;
+      if (r.status === 429) { await sleep(10000); continue; }
+      return false;
+    } catch (e) { console.log('ntfy error:', e.message); await sleep(3000); }
+  }
+  return false;
 }
 
 async function fetchT(url, opts = {}, ms = 20000) {
@@ -70,8 +85,6 @@ async function checkSite(host) {
       const body = (await r.text()).toLowerCase();
       console.log('Homepage:', r.status, r.url);
       if (bare(finalHost) !== bare(host)) {
-        // Google / Blogger ka apna page: aksar GitHub server ko "robot" samajh kar roka jata hai.
-        // Is surat mein feed se dobara dekho; feed chal rahi hai to site theek hai.
         if (/(^|\.)(google\.[a-z.]+|blogger\.com|blogspot\.com|googleusercontent\.com)$/i.test(finalHost)) {
           if (await feedAlive(host)) { console.log('Google ka bot-check page mila, lekin feed theek hai: site OK'); return { ok: true }; }
           return { ok: false, reason: `Site Google/Blogger ke page par ja rahi hai aur feed bhi nahi khul rahi.\n${r.url}\nBlog band, private ya removed ho sakta hai. Blogger dashboard aur Gmail check karo.` };
@@ -92,12 +105,14 @@ async function checkSite(host) {
 }
 
 // ---------------- 2. SSL expiry ----------------
+// rejectUnauthorized:false = expired / ghalat certificate bhi padh sakein (warna error aata aur alert na jata)
 function sslExpiry(host) {
   return new Promise((resolve, reject) => {
-    const s = tls.connect(443, host, { servername: host, timeout: 15000 }, () => {
+    const s = tls.connect(443, host, { servername: host, timeout: 15000, rejectUnauthorized: false }, () => {
       const c = s.getPeerCertificate();
+      const authErr = s.authorized ? '' : String(s.authorizationError || '');
       s.end();
-      resolve(c && c.valid_to ? new Date(c.valid_to) : null);
+      resolve(c && c.valid_to ? { date: new Date(c.valid_to), authErr } : null);
     });
     s.on('error', reject);
     s.on('timeout', () => { s.destroy(); reject(new Error('timeout')); });
@@ -111,29 +126,29 @@ function apexDomain(host) {
   return p.slice(-2).join('.');
 }
 async function domainExpiry(host) {
-  const r = await fetchT('https://rdap.org/domain/' + apexDomain(host), { redirect: 'follow', headers: { 'Accept': 'application/rdap+json, application/json' } }, 25000);
+  const r = await fetchT('https://rdap.org/domain/' + apexDomain(host), { redirect: 'follow', headers: { Accept: 'application/rdap+json, application/json' } }, 25000);
   if (!r.ok) throw new Error('RDAP HTTP ' + r.status);
   const j = await r.json();
   const ev = (j.events || []).find((e) => /expiration/i.test(e.eventAction || ''));
   return ev && ev.eventDate ? new Date(ev.eventDate) : null;
 }
 
-// expiry warning sirf in din par: pehli dafa jab har threshold cross ho
+// expiry warning sirf tab jab har threshold pehli dafa cross ho
 async function expiryAlert(st, key, name, date, thresholds) {
   const left = Math.ceil((date.getTime() - Date.now()) / DAY);
   const iso = date.toISOString().slice(0, 10);
   const rec = st[key] || {};
-  if (rec.date !== iso) {                    // nayi date (renew hua ya pehli dafa)
+  if (rec.date !== iso) {
     if (rec.date && rec.date < iso) await notify(`${name} renew ho gaya`, `Nayi expiry: ${iso} (${left} din baqi)`, { tags: 'white_check_mark', priority: 'low' });
     st[key] = { date: iso, lastTh: 9999 };
   }
   const th = thresholds.filter((t) => left <= t).sort((a, b) => a - b)[0];
   if (th !== undefined && th < st[key].lastTh) {
     const expired = left <= 0;
-    await notify(expired ? `${name} EXPIRE ho chuka hai!` : `${name} ${left} din mein expire hoga`,
+    const ok = await notify(expired ? `${name} EXPIRE ho chuka hai!` : `${name} ${left} din mein expire hoga`,
       `Expiry date: ${iso}\n${expired ? 'Foran renew karo, warna site band ho jaye gi.' : 'Waqt par renew kar lo.'}`,
       { tags: expired ? 'rotating_light' : 'warning', priority: (left <= 3 ? 'urgent' : 'high') });
-    st[key].lastTh = th;
+    if (ok) st[key].lastTh = th;
   }
   return left;
 }
@@ -194,7 +209,7 @@ async function main() {
     if (st.downSince) {
       const m = Math.max(1, Math.round((Date.now() - st.downSince) / 60000));
       await notify('Site wapis chal padi', `Takreeban ${m} minute down rahi.`, { tags: 'white_check_mark' });
-      st.downSince = 0;
+      st.downSince = 0; st.downNotified = 0;
     }
     console.log('Site OK');
     summary.push('Site: chal rahi hai');
@@ -202,8 +217,19 @@ async function main() {
 
   // ---- 2. SSL ----
   try {
-    const exp = await sslExpiry(host);
-    if (exp) { const d = await expiryAlert(st, 'ssl', 'SSL certificate', exp, [10, 3, 1]); summary.push(`SSL: ${d} din baqi`); console.log('SSL days left', d); }
+    const ssl = await sslExpiry(host);
+    if (ssl) {
+      const d = await expiryAlert(st, 'ssl', 'SSL certificate', ssl.date, [10, 3, 1]);
+      summary.push(`SSL: ${d} din baqi`); console.log('SSL days left', d);
+      // expire nahi hua lekin phir bhi ghalat (jaise domain match nahi): din mein ek dafa batao
+      if (d > 0 && ssl.authErr && !/EXPIRED/i.test(ssl.authErr)) {
+        const today = new Date(Date.now() + 5 * HOUR).toISOString().slice(0, 10);
+        if (st.sslErrDay !== today) {
+          await notify('SSL certificate mein masla', `${host}: ${ssl.authErr}\nBrowser mein "Not secure" aa sakta hai. Blogger > Settings > HTTPS check karo.`, { tags: 'warning', priority: 'high' });
+          st.sslErrDay = today;
+        }
+      }
+    }
   } catch (e) { console.log('SSL check error:', e.message); }
 
   // ---- 3. Domain ----
@@ -243,13 +269,15 @@ async function main() {
           }
         } else {
           st.massWarned = 0;
+          let ok = true;
           if (missing.length) {
-            await notify(`${missing.length} post site se hat gayi`,
-              missing.map((id) => `• ${prev[id].t}\n  ${prev[id].u}`).join('\n') +
-              '\n\nAgar aapne khud draft ya delete nahi ki, to Blogger dashboard aur Gmail check karo (DMCA ho sakta hai).',
+            ok = await notify(`${missing.length} post site se hat gayi`,
+              missing.slice(0, MAX_LIST).map((id) => `• ${prev[id].t}\n  ${prev[id].u}`).join('\n') +
+              (missing.length > MAX_LIST ? `\n... aur ${missing.length - MAX_LIST} posts` : '') +
+              '\n\nAgar aapne khud draft ya delete nahi ki, to Blogger dashboard aur Gmail check karo.',
               { tags: 'rotating_light', priority: 'high', click: (prev[missing[0]] || {}).u || BLOG_URL });
           }
-          await M.child('posts').set(now);
+          if (ok) await M.child('posts').set(now);   // alert fail hua to agli run mein dobara try
         }
         console.log(`Posts: ${n} (pehle ${prevN}), gayab: ${missing.length}`);
       }
