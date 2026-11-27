@@ -2,7 +2,7 @@ name: Video Link Checker
 
 on:
   schedule:
-    - cron: '20 * * * *'   # har ghante chalta hai; din mein 4 baar (12, 9, 2, 8 PK) poori site check karta hai
+    - cron: '20 * * * *'   # har ghante chalta hai: site monitor har dafa, poora link check din mein 4 baar
   workflow_dispatch:
     inputs:
       test_url:
@@ -10,7 +10,7 @@ on:
         required: false
         default: ''
       force:
-        description: 'Aaj dobara poora check (true / false)'
+        description: 'Abhi dobara poora link check (true / false)'
         required: false
         default: 'false'
 
@@ -29,6 +29,15 @@ jobs:
           node-version: '20'
       - name: Install
         run: npm install firebase-admin@12
+      - name: Site monitor
+        if: ${{ github.event.inputs.test_url == '' || github.event.inputs.test_url == null }}
+        continue-on-error: true
+        run: node monitor.js
+        env:
+          BLOG_URL: ${{ secrets.BLOG_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
       - name: Run checker
         run: node checker.js
         env:
@@ -37,6 +46,6 @@ jobs:
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           RUN_MINUTES: '40'
-          START_HOURS: '0,9,14,20'   # raat 12, subah 9, dopehar 2, raat 8 (Pakistan time)
+          START_HOURS: '0,9,15,20'   # raat 12, subah 9, sham 3, raat 8 (Pakistan time)
           TEST_URL: ${{ github.event.inputs.test_url }}
           FORCE: ${{ github.event.inputs.force }}
