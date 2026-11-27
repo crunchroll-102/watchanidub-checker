@@ -1,0 +1,34 @@
+name: Anime Release Alerts
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'   # har 15 minute (ghante ke shuru ka rush avoid karne ke liye :07 se)
+  workflow_dispatch:
+
+concurrency:
+  group: anime-alerts
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install firebase-admin@12
+      - name: Anime release alerts
+        run: node anilist.js
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          PRE_MIN: '70'        # episode / nayi anime se kitne minute pehle alert
+          PRE_POP: '0'         # pehle wala alert: 0 = SAB anime
+          MIN_POP: '0'         # raat ki list aur 1 din pehle nayi anime: 0 = SAB anime
+          ALERT_POP: '-1'      # air hone par "Abhi aaya" alert: -1 = band
+          DIGEST_HOUR: '20'    # kal ki list raat 8 baje (PK)
+          NEWS: 'true'         # nayi announcements ('false' = band)
