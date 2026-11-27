@@ -1,27 +1,18 @@
-name: Video Link Checker
+name: Site Monitor
 
 on:
   schedule:
-    - cron: '20 * * * *'   # har ghante: site monitor har dafa, poora link check din mein 4 baar
+    - cron: '20 * * * *'   # har ghante
   workflow_dispatch:
-    inputs:
-      test_url:
-        description: 'Sirf ek link test karna ho to yahan paste karein (warna khali)'
-        required: false
-        default: ''
-      force:
-        description: 'Abhi dobara poora link check (true / false)'
-        required: false
-        default: 'false'
 
 concurrency:
-  group: link-checker
+  group: site-monitor
   cancel-in-progress: false
 
 jobs:
-  check:
+  monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -30,22 +21,11 @@ jobs:
       - name: Install
         run: npm install firebase-admin@12
       - name: Site monitor
-        if: ${{ github.event.inputs.test_url == '' || github.event.inputs.test_url == null }}
-        continue-on-error: true
         run: node monitor.js
         env:
           BLOG_URL: ${{ secrets.BLOG_URL }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC_MONITOR: ${{ secrets.NTFY_TOPIC_MONITOR }}   # optional: site alerts ke liye alag topic
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      - name: Run checker
-        run: node checker.js
-        env:
-          BLOG_URL: ${{ secrets.BLOG_URL }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          RUN_MINUTES: '40'
-          START_HOURS: '0,9,15,20'   # raat 12, subah 9, sham 3, raat 8 (Pakistan time)
-          TEST_URL: ${{ github.event.inputs.test_url }}
-          FORCE: ${{ github.event.inputs.force }}
