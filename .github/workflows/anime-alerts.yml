@@ -20,7 +20,8 @@ jobs:
           node-version: '20'
       - name: Install
         run: npm install firebase-admin@12
-      - name: Anime release alerts
+      - name: Anime release alerts (sub)
+        continue-on-error: true
         run: node anilist.js
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -32,3 +33,14 @@ jobs:
           ALERT_POP: '-1'      # air hone par "Abhi aaya" alert: -1 = band
           DIGEST_HOUR: '20'    # kal ki list raat 8 baje (PK)
           NEWS: 'true'         # nayi announcements ('false' = band)
+      - name: Dub alerts (English + Hindi)
+        continue-on-error: true
+        run: node dub.js
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          ANIMESCHEDULE_TOKEN: ${{ secrets.ANIMESCHEDULE_TOKEN }}
+          PRE_MIN: '70'        # English dub episode se kitne minute pehle alert
+          DIGEST_HOUR: '20'    # kal ki dub list raat 8 baje (PK)
+          HINDI_NEWS: 'true'   # Hindi dub ki khabrein ('false' = band)
