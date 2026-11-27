@@ -2,7 +2,7 @@ name: Video Link Checker
 
 on:
   schedule:
-    - cron: '20 * * * *'   # har ghante chalta hai: site monitor har dafa, poora link check din mein 4 baar
+    - cron: '20 * * * *'   # har ghante: site monitor har dafa, poora link check din mein 4 baar
   workflow_dispatch:
     inputs:
       test_url:
@@ -38,16 +38,6 @@ jobs:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-      - name: AniList alerts
-        if: ${{ github.event.inputs.test_url == '' || github.event.inputs.test_url == null }}
-        continue-on-error: true
-        run: node anilist.js
-        env:
-          BLOG_URL: ${{ secrets.BLOG_URL }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          DIGEST: 'true'             # roz sham mashhoor aane wali anime ki list ('false' = band)
       - name: Run checker
         run: node checker.js
         env:
