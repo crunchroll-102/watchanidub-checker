@@ -1,15 +1,14 @@
 // ================================================================
-//  Watchanidubs - Dub Alerts v2 (har 15 minute)
+//  Watchanidubs - English Dub Alerts v3 (DUB, har 15 minute)
 //
-//  ENGLISH DUB (AnimeSchedule.net, token chahiye):
+//  AnimeSchedule.net (token chahiye):
 //   1. 7 din pehle  : agle hafte shuru hone wale naye dubs
 //   2. 1 din pehle  : naya dub kal shuru + roz raat kal ki poori list
 //   3. 1 ghanta pehle: ntfy par exact time ke liye scheduled alert
 //   4. Release par  : "release ho gaya" alert
 //
-//  HINDI DUB (Google News + AniList titles, koi token nahi):
-//   - Sirf asli anime ki Hindi dub khabrein
-//   - Indian movies / serials filter ho jate hain
+//  v3: Hindi dub ab alag file (hindi.js) mein hai.
+//      Apna alag ntfy topic (NTFY_TOPIC_DUB), har alert par [DUB] likha
 // ================================================================
 const admin = require('firebase-admin');
 
@@ -17,20 +16,15 @@ function int(v, d) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 
 
 const ENV = process.env;
 const NTFY_SERVER = (ENV.NTFY_SERVER || 'https://ntfy.sh').trim().replace(/\/+$/, '');
-const NTFY_TOPIC = (ENV.NTFY_TOPIC || '').trim();
-const NTFY_TOKEN = (ENV.NTFY_TOKEN || '').trim();          // optional (private topic ke liye)
+const NTFY_TOPIC = (ENV.NTFY_TOPIC_DUB || 'watchanidubs-Dub').trim();
+const NTFY_TOKEN = (ENV.NTFY_TOKEN || '').trim();
+const LABEL = '[DUB] ';
 const AS_TOKEN = (ENV.ANIMESCHEDULE_TOKEN || '').trim();
 const PRE_MIN = int(ENV.PRE_MIN, 60);                      // kitne minute pehle alert
 const DIGEST_HOUR = int(ENV.DIGEST_HOUR, 20);              // roz raat list (PK time)
 const RELEASE_WINDOW_H = int(ENV.RELEASE_WINDOW_H, 3);     // release alert kitni der tak valid
 const SCHEDULE_AHEAD_H = int(ENV.SCHEDULE_AHEAD_H, 3);     // 1-ghanta alert kitna pehle schedule ho
-const HINDI_NEWS = (ENV.HINDI_NEWS || 'true') === 'true';
-const HINDI_PRIORITY = (ENV.HINDI_PRIORITY || 'default').trim();
-const HINDI_QUERIES = (ENV.HINDI_QUERIES ||
-  '"anime" "Hindi dub"|"anime" "Hindi dubbed"|Crunchyroll "Hindi dub"|"Sony YAY" anime Hindi|Netflix anime "Hindi dub"|एनीमे हिंदी डब|एनीमे हिंदी')
-  .split('|').map((q) => q.trim()).filter(Boolean);
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3, TZ = 5 * HOUR;
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WD = ['Itwar', 'Peer', 'Mangal', 'Budh', 'Jumeraat', 'Juma', 'Hafta'];
@@ -47,11 +41,11 @@ function pkClock(ms) {
 }
 const whenWord = (at, now) => pkDay(at) === pkDay(now) ? 'Aaj' : pkDay(at) === pkDay(now + DAY) ? 'Kal' : pkDate(at);
 const hash36 = (s) => { let h = 5381; for (const c of String(s)) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0; return h.toString(36); };
-const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
 // ------------------------- ntfy -------------------------
 // opts.delay = ms timestamp -> ntfy us waqt message deliver karega
 async function notify(title, body, opts = {}) {
+  title = LABEL + title;
   if (!NTFY_TOPIC) { console.log('[ntfy off]', title, '\n' + body); return true; }
   const msg = body.length > 3800 ? body.slice(0, 3750) + '\n... aur bhi hain' : body;
   let q = '?title=' + encodeURIComponent(title) +
@@ -88,7 +82,7 @@ async function notifyList(title, lines, footer, opts) {
   return ok;
 }
 
-// ======================= ENGLISH DUB =======================
+// ------------------------- AnimeSchedule -------------------------
 function isoWeek(ms) {
   const d = new Date(ms); d.setUTCHours(0, 0, 0, 0);
   const day = d.getUTCDay() || 7;
@@ -224,6 +218,8 @@ async function englishDub(st, sent, now) {
   console.log('Dub entries:', list.length);
   const firstRun = !st.dubStarted;
   const firstV2 = !st.v2Started;   // purane version se upgrade: purani release spam na ho
+  const topicH = hash36(NTFY_TOPIC);
+  const topicChanged = st.topicH !== topicH;
 
   await weekAhead(list, sent, now);
   await dayAhead(list, sent, now);
@@ -231,161 +227,15 @@ async function englishDub(st, sent, now) {
   await released(list, sent, now, firstRun || firstV2);
   await dailyDigest(list, st, now);
 
-  if (firstRun || firstV2) {
+  if (firstRun || firstV2 || topicChanged) {
     const next24 = list.filter((s) => s.at > now && s.at - now <= DAY).length;
-    await notify('English dub alerts v2 chalu',
+    const ok = await notify('English dub alerts is topic par chalu',
       `Agle 24 ghante mein ${next24} dub episode.\n• 7 din pehle: naye dubs\n• 1 din pehle: naya dub + raat ${DIGEST_HOUR > 12 ? DIGEST_HOUR - 12 : DIGEST_HOUR} baje kal ki list\n• ${PRE_MIN} min pehle: har episode\n• Release par: alert`,
       { tags: 'white_check_mark' });
     st.dubStarted = st.dubStarted || now;
-    st.v2Started = now;
+    st.v2Started = st.v2Started || now;
+    if (ok) st.topicH = topicH;
   }
-}
-
-// ======================= HINDI DUB NEWS =======================
-const HINDI_RX = /hindi|हिंदी|हिन्दी/i;
-const ANIME_RX = /\banime\b|एनीमे|एनिमे|crunchyroll|animax|sony yay|\bmanga\b/i;
-const BLOCK_RX = /bollywood|tollywood|kollywood|mollywood|sandalwood|box office|south (indian )?(movie|film)|bhojpuri|web ?series|\bserial\b|पुष्पा|बॉलीवुड|साउथ/i;
-// Aam English words jo anime ke naam bhi hain (galat match se bachne ke liye)
-const STOP = new Set(['another', 'monster', 'given', 'orange', 'erased', 'nana', 'gate', 'rewrite', 'akira', 'kingdom',
-  'pluto', 'blood', 'angel', 'charlotte', 'overlord', 'trigun', 'chaos', 'beyond', 'hunter', 'world', 'anime']);
-
-const norm = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-z0-9\u0900-\u097f]+/g, ' ').trim();
-
-function titleVariants(t) {
-  const out = new Set();
-  for (const raw of [t && t.english, t && t.romaji]) {
-    if (!raw) continue;
-    const parts = [raw, raw.split(/[:：]/)[0],
-      raw.replace(/\b(season|part|cour)\s*\d+\b|\b\d+(st|nd|rd|th)\s+season\b|\bfinal season\b/gi, '')];
-    for (const p of parts) {
-      const n = norm(p);
-      if (n.length >= 5 && !STOP.has(n) && !/^\d+$/.test(n)) out.add(n);
-    }
-  }
-  return out;
-}
-
-const AL_QUERY = 'query($page:Int,$sort:[MediaSort]){Page(page:$page,perPage:50){media(type:ANIME,sort:$sort,isAdult:false){title{romaji english}}}}';
-async function anilistPage(page, sort) {
-  for (let t = 1; t <= 3; t++) {
-    const r = await fetch('https://graphql.anilist.co', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ query: AL_QUERY, variables: { page, sort: [sort] } })
-    });
-    if (r.status === 429) { await sleep(60000); continue; }
-    if (!r.ok) { if (t === 3) throw new Error('AniList HTTP ' + r.status); await sleep(5000); continue; }
-    const j = await r.json();
-    return (j && j.data && j.data.Page && j.data.Page.media) || [];
-  }
-  return [];
-}
-
-// Din mein ek dafa AniList se ~500 popular + trending anime ke naam (Firebase mein cache)
-async function loadTitles(R, now) {
-  const c = (await R.child('titles').get()).val();
-  if (c && c.day === pkDay(now) && Array.isArray(c.list) && c.list.length) return c.list;
-  try {
-    const set = new Set();
-    const jobs = [];
-    for (let p = 1; p <= 10; p++) jobs.push([p, 'POPULARITY_DESC']);
-    for (let p = 1; p <= 2; p++) jobs.push([p, 'TRENDING_DESC']);
-    for (const [p, s] of jobs) {
-      for (const m of await anilistPage(p, s)) for (const v of titleVariants(m.title)) set.add(v);
-      await sleep(2100);   // AniList rate limit
-    }
-    const list = [...set];
-    if (list.length < 100) throw new Error('bohat kam titles mile: ' + list.length);
-    await R.child('titles').set({ day: pkDay(now), list });
-    console.log('AniList titles:', list.length);
-    return list;
-  } catch (e) {
-    console.log('AniList titles error:', e.message);
-    return (c && Array.isArray(c.list)) ? c.list : [];
-  }
-}
-
-// Khabar asli anime Hindi dub ki hai ya nahi
-function classify(title, titles) {
-  if (!HINDI_RX.test(title) || BLOCK_RX.test(title)) return null;
-  const n = ' ' + norm(title) + ' ';
-  let best = '';
-  for (const t of titles) if (t.length > best.length && n.includes(' ' + t + ' ')) best = t;
-  if (best) return { anime: titleCase(best) };
-  if (ANIME_RX.test(title)) return { anime: '' };
-  return null;
-}
-
-function decode(s) {
-  return String(s || '').replace(/^<!\[CDATA\[|\]\]>$/g, '')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(+n))
-    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-    .replace(/<[^>]*>/g, '').trim();
-}
-function parseRss(xml) {
-  return [...String(xml).matchAll(/<item>([\s\S]*?)<\/item>/g)].map((m) => {
-    const g = (tag) => { const x = m[1].match(new RegExp('<' + tag + '[^>]*>([\\s\\S]*?)</' + tag + '>')); return x ? decode(x[1]) : ''; };
-    return { title: g('title'), link: g('link'), date: Date.parse(g('pubDate')) || 0, src: g('source') };
-  });
-}
-async function googleNews(q) {
-  const hi = /[\u0900-\u097F]/.test(q);
-  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q + ' when:7d')}&hl=${hi ? 'hi' : 'en-IN'}&gl=IN&ceid=IN:${hi ? 'hi' : 'en'}`;
-  const r = await fetch(url, { headers: { 'User-Agent': UA } });
-  if (!r.ok) throw new Error('Google News HTTP ' + r.status);
-  return parseRss(await r.text());
-}
-
-async function hindiNews(R, st, now) {
-  if (!HINDI_NEWS) return;
-  if (st.newsAt && now - st.newsAt < 55 * MIN) return;   // har ghante ek dafa
-  const titles = await loadTitles(R, now);
-  const seen = (await R.child('newsSeen').get()).val() || {};
-  const firstRun = !st.newsStarted;
-  const fresh = [], batch = new Set();
-  let skipped = 0, okQueries = 0;
-
-  for (const q of HINDI_QUERIES) {
-    try {
-      for (const it of await googleNews(q)) {
-        if (!it.title || !it.link) continue;
-        const h = hash36(it.link), th = hash36(it.title.toLowerCase().replace(/\s+-\s+[^-]+$/, ''));
-        if (seen[h] || seen[th] || batch.has(th)) continue;
-        const c = classify(it.title, titles);
-        if (!c) { skipped++; continue; }
-        seen[h] = now; seen[th] = now; batch.add(th);
-        if (!firstRun && it.date && now - it.date < 3 * DAY) fresh.push({ ...it, anime: c.anime });
-      }
-      okQueries++;
-    } catch (e) { console.log('News error:', q, e.message); }
-    await sleep(1500);
-  }
-  console.log(`Hindi news: ${fresh.length} nayi, ${skipped} filter hui, ${okQueries}/${HINDI_QUERIES.length} queries ok`);
-
-  if (fresh.length) {
-    fresh.sort((a, b) => b.date - a.date);
-    const ok = await notifyList(
-      fresh.length === 1 ? `Hindi dub${fresh[0].anime ? ': ' + fresh[0].anime : ' khabar'}` : `Hindi dub: ${fresh.length} nayi khabrein`,
-      fresh.slice(0, 15).map((it) => `• ${it.anime ? '[' + it.anime + '] ' : ''}${it.title}${it.src && !it.title.includes(it.src) ? ' (' + it.src + ')' : ''}\n  ${it.link}`),
-      '', { tags: 'flag-in,loudspeaker', priority: HINDI_PRIORITY, click: fresh[0].link });
-    if (!ok) for (const it of fresh) { delete seen[hash36(it.link)]; }   // fail hua to agli dafa dobara try
-  }
-
-  if (okQueries === 0) {   // Google News poora fail: din mein ek dafa batao
-    if (st.newsErrDay !== pkDay(now)) {
-      await notify('Hindi dub news mein masla', 'Google News se koi result nahi aa raha. Logs check karein.', { tags: 'warning' });
-      st.newsErrDay = pkDay(now);
-    }
-  }
-
-  for (const k of Object.keys(seen)) if (now - seen[k] > 30 * DAY) delete seen[k];
-  await R.child('newsSeen').set(seen);
-  if (firstRun) {
-    await notify('Hindi dub news alerts chalu', 'Har ghante Google News par sirf anime ki Hindi dub khabrein dekhi jayengi. Indian movies filter hoti hain.', { tags: 'white_check_mark' });
-    st.newsStarted = now;
-  }
-  st.newsAt = now;
 }
 
 // ======================= MAIN =======================
@@ -401,7 +251,6 @@ async function main() {
   let err = null;
 
   try { await englishDub(st, sent, now); } catch (e) { console.log('English dub error:', e.message); err = e; }
-  try { await hindiNews(R, st, now); } catch (e) { console.log('Hindi news error:', e.message); }
 
   for (const k of Object.keys(sent)) if (now - sent[k] > 40 * DAY) delete sent[k];
 
