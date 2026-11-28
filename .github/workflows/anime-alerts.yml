@@ -1,18 +1,21 @@
-name: Anime Release Alerts
+name: Anime Alerts (Sub / Dub / Hindi)
 
 on:
   schedule:
     - cron: '7,22,37,52 * * * *'   # har 15 minute (:07 se, taake ghante ke shuru ka rush na ho)
-  workflow_dispatch:
+  workflow_dispatch:                # manual run: Hindi news bhi foran check hoti hai
 
 concurrency:
   group: anime-alerts
   cancel-in-progress: false
 
+# Teeno jobs alag alag aur ek saath chalte hain.
+# Ek fail ho ya slow ho to baqi do par asar nahi padta.
 jobs:
-  alerts:
+  sub:
+    name: SUB alerts (AniList)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,13 +23,11 @@ jobs:
           node-version: '20'
       - name: Install
         run: npm install firebase-admin@12
-
       - name: Anime release alerts (sub)
-        continue-on-error: true
         run: node anilist.js
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}          # optional, khali bhi chalega
+          NTFY_TOPIC_SUB: ${{ secrets.NTFY_TOPIC_SUB }}  # optional: khali ho to watchanidubs-Sub
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}          # optional
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           PRE_MIN: '60'          # episode se kitne minute pehle alert
@@ -38,11 +39,21 @@ jobs:
           DIGEST_HOUR: '20'      # kal ki list raat 8 baje (PK)
           NEWS: 'true'           # nayi announcements ('false' = band)
 
-      - name: Dub alerts (English + Hindi)
-        continue-on-error: true
+  dub:
+    name: DUB alerts (English)
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install firebase-admin@12
+      - name: English dub alerts
         run: node dub.js
         env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC_DUB: ${{ secrets.NTFY_TOPIC_DUB }}  # optional: khali ho to watchanidubs-Dub
           NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
@@ -50,5 +61,27 @@ jobs:
           PRE_MIN: '60'          # English dub episode se kitne minute pehle alert
           SCHEDULE_AHEAD_H: '3'
           DIGEST_HOUR: '20'      # kal ki dub list raat 8 baje (PK)
-          HINDI_NEWS: 'true'     # Hindi dub ki khabrein ('false' = band)
-          HINDI_PRIORITY: 'default'
+
+  hindi:
+    name: HINDI dub news
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install firebase-admin@12
+      - name: Hindi dub news
+        run: node hindi.js
+        env:
+          NTFY_TOPIC_HINDI: ${{ secrets.NTFY_TOPIC_HINDI }}  # optional: khali ho to watchanidubs-Hindi
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          HINDI_PRIORITY: 'default'   # Hindi alert ki priority (low / default / high)
+          HINDI_EVERY_MIN: '55'       # Google News kitne minute baad dobara check ho
+          REPORT_HOUR: '21'           # roz raat 9 baje report (PK)
+          FRESH_DAYS: '3'             # sirf 3 din tak purani khabar
+          FORCE: ${{ github.event_name == 'workflow_dispatch' }}
