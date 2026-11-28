@@ -1,5 +1,5 @@
 // ================================================================
-//  Watchanidubs - Anime Release Alerts v2 (AniList, har 15 minute)
+//  Watchanidubs - Anime Release Alerts v3 (SUB, AniList, har 15 minute)
 //
 //   1. 7 din pehle   : agle hafte shuru hone wali nayi anime
 //   2. 1 din pehle   : nayi anime kal shuru + roz raat kal ki poori list
@@ -7,6 +7,8 @@
 //   4. Release par   : "Abhi aaya" alert (ALERT_POP)
 //   + watchlist.json (optional): har episode 1 din pehle
 //   + roz raat: nayi mashhoor anime announcements
+//
+//  v3: apna alag ntfy topic (NTFY_TOPIC_SUB), har alert par [SUB] likha
 // ================================================================
 const admin = require('firebase-admin');
 const fs = require('fs');
@@ -16,8 +18,9 @@ function int(v, d) { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 
 
 const ENV = process.env;
 const NTFY_SERVER = (ENV.NTFY_SERVER || 'https://ntfy.sh').trim().replace(/\/+$/, '');
-const NTFY_TOPIC = (ENV.NTFY_TOPIC || '').trim();
+const NTFY_TOPIC = (ENV.NTFY_TOPIC_SUB || 'watchanidubs-Sub').trim();
 const NTFY_TOKEN = (ENV.NTFY_TOKEN || '').trim();
+const LABEL = '[SUB] ';
 const MIN_POP = int(ENV.MIN_POP, 0);                 // raat ki list + 1 din pehle nayi anime
 const WEEK_POP = int(ENV.WEEK_POP, 5000);            // 7 din pehle wala alert
 const PRE_POP = int(ENV.PRE_POP, 2000);              // 1 ghanta pehle wala alert (0 = sab)
@@ -47,6 +50,7 @@ function pkClock(ms) {
 const whenWord = (at, now) => pkDay(at) === pkDay(now) ? 'Aaj' : pkDay(at) === pkDay(now + DAY) ? 'Kal' : pkDate(at);
 const nameOf = (m) => ((m.title && (m.title.english || m.title.romaji)) || ('#' + m.id)).slice(0, 90);
 const fmtOf = (f) => FMT[f] || f || '';
+const hash36 = (s) => { let h = 5381; for (const c of String(s)) h = ((h * 33) ^ c.charCodeAt(0)) >>> 0; return h.toString(36); };
 function dateStr(sd) {
   if (!sd || !sd.year) return '';
   return `${sd.day ? sd.day + ' ' : ''}${sd.month ? MON[sd.month - 1] + ' ' : ''}${sd.year}`;
@@ -56,6 +60,7 @@ const groupByTime = (arr) => { const m = new Map(); for (const s of arr) { if (!
 
 // ------------------------- ntfy -------------------------
 async function notify(title, body, opts = {}) {
+  title = LABEL + title;
   if (!NTFY_TOPIC) { console.log('[ntfy off]', title, '\n' + body); return true; }
   const msg = body.length > 3800 ? body.slice(0, 3750) + '\n... aur bhi hain' : body;
   let q = '?title=' + encodeURIComponent(title) +
@@ -164,6 +169,8 @@ async function main() {
   const now = Date.now();
   const firstRun = !st.started;
   const quiet = firstRun || !st.v2Started;   // pehli run / upgrade: purane alerts ka spam nahi
+  const topicH = hash36(NTFY_TOPIC);
+  const topicChanged = st.topicH !== topicH;  // naya topic laga: wahan "chalu" message bhejo
   const big = (s, min) => s.pop >= min || watch.has(s.id);
   const star = (s) => watch.has(s.id) ? ' ⭐' : '';
   const count = { week: 0, prem: 0, soon: 0, aired: 0, wl: 0 };
@@ -268,13 +275,14 @@ async function main() {
     if (ok) st.digestDay = pkDay(now);
   }
 
-  if (quiet) {
+  if (quiet || topicChanged) {
     const next24 = list.filter((s) => s.at > now && s.at - now <= DAY && big(s, MIN_POP)).length;
-    await notify('Anime release alerts v2 chalu',
+    const ok = await notify('Anime release (SUB) alerts is topic par chalu',
       `Agle 24 ghante mein ${next24} episode.\n• 7 din pehle: nayi anime\n• 1 din pehle: nayi anime + raat ${DIGEST_HOUR > 12 ? DIGEST_HOUR - 12 : DIGEST_HOUR} baje kal ki list\n• ${PRE_MIN} min pehle: har episode\n• Release par: ${ALERT_POP < 0 ? 'band' : 'alert'}`,
       { tags: 'white_check_mark' });
     st.started = st.started || now;
-    st.v2Started = now;
+    st.v2Started = st.v2Started || now;
+    if (ok) st.topicH = topicH;
   }
 
   for (const k of Object.keys(sent)) if (now - sent[k] > 40 * DAY) delete sent[k];
